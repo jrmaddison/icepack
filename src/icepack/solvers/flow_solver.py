@@ -247,7 +247,7 @@ class PETScSolver:
         # Create homogeneous BCs for the Dirichlet part of the boundary
         u = self._fields["velocity"]
         V = u.function_space()
-        bcs = firedrake.DirichletBC(V, u, self._dirichlet_ids)
+        bcs = firedrake.DirichletBC(V, u.copy(deepcopy=True), self._dirichlet_ids)
         if not self._dirichlet_ids:
             bcs = None
 
