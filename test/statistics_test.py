@@ -17,7 +17,6 @@ import firedrake
 from firedrake import inner, grad, dx, exp, interpolate, as_vector
 import firedrake.adjoint
 import icepack
-from icepack.statistics import StatisticsProblem, MaximumProbabilityEstimator
 from icepack.constants import (
     ice_density as ρ_I,
     water_density as ρ_W,
@@ -25,8 +24,10 @@ from icepack.constants import (
     glen_flow_law as n,
 )
 
+import petsc4py.PETSc as PETSc
+from tlm_adjoint import Functional, minimize_l_bfgs, minimize_tao
 
-@pytest.mark.skipif(not icepack.statistics.has_rol, reason="Couldn't import ROL")
+
 def test_poisson_problem():
     Nx, Ny = 32, 32
 
@@ -71,14 +72,20 @@ def test_poisson_problem():
         return 0.5 * α**2 * inner(grad(q), grad(q)) * dx
 
     q_initial = firedrake.Function(Q)
-    problem = StatisticsProblem(simulation, loss_functional, regularization, q_initial)
-    estimator = MaximumProbabilityEstimator(problem, gradient_tolerance=1e-7)
-    q = estimator.solve()
+
+    def forward(q):
+        u = simulation(q)
+        J = Functional(name="J")
+        J.assign(loss_functional(u) + regularization(q))
+        return J
+
+    q = minimize_tao(forward, q_initial,
+                     method=PETSc.TAO.Type.LMVM,
+                     gatol=1.0e-11, grtol=0.0, gttol=0.0)
 
     assert firedrake.norm(q - q_true) < 0.25
 
 
-@pytest.mark.skipif(not icepack.statistics.has_rol, reason="Couldn't import ROL")
 @pytest.mark.parametrize("with_noise", [False, True])
 def test_ice_shelf_inverse(with_noise):
     Nx, Ny = 32, 32
@@ -160,10 +167,13 @@ def test_ice_shelf_inverse(with_noise):
             velocity=u_initial, thickness=h, log_fluidity=q
         )
 
-    stats_problem = StatisticsProblem(
-        simulation, loss_functional, regularization, q_initial
-    )
-    estimator = MaximumProbabilityEstimator(stats_problem)
-    q = estimator.solve()
+    def forward(q):
+        u = simulation(q)
+        J = Functional(name="J")
+        J.assign(loss_functional(u) + regularization(q))
+        return J
+
+    q, _ = minimize_l_bfgs(forward, q_initial, m=100,
+                           s_atol=5.0e-3, g_atol=1.0e-4)
 
     assert firedrake.norm(q - q_true) / firedrake.norm(q_initial - q_true) < 0.25
