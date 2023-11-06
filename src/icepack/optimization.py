@@ -13,6 +13,16 @@
 import firedrake
 from .utilities import default_solver_parameters
 
+try:
+    from tlm_adjoint.override import manager_method
+except ImportError:
+    manager_method = None
+if manager_method is not None:
+    from tlm_adjoint.firedrake import (
+        EquationSolver, ZeroConstant, extract_coefficients, var_assign,
+        var_copy, var_update_state)
+import ufl
+
 
 class MinimizationProblem:
     def __init__(self, E, S, u, bcs, form_compiler_parameters):
@@ -147,3 +157,60 @@ class NewtonSolver:
                 raise firedrake.ConvergenceError(
                     f"Newton search did not converge after {self.max_iterations} iterations!"
                 )
+
+
+if manager_method is not None:
+    def NewtonSolver_solve_post_call(self, *args, **kwargs):
+        var_update_state(self.problem.u)
+
+    @manager_method(NewtonSolver, "solve",
+                    post_call=NewtonSolver_solve_post_call)
+    def NewtonSolver_solve(self, orig, orig_args, *, annotate, tlm, **kwargs):
+        class _NewtonSolver(EquationSolver):
+            def __init__(self, solver):
+                # Hack: We want the dependencies of S to be dependencies of the
+                # equation. This marks them *non-linear* dependencies (in the sense
+                # of being marked as non-linear dependencies of the forward
+                # residual). This works, but might be inefficient.
+                F = solver.F
+                zero_u = ZeroConstant(shape=solver.problem.u.ufl_shape)
+                test_u = firedrake.TestFunction(solver.problem.u.function_space())
+                for dep in extract_coefficients(solver.problem.S):
+                    F = F + (ufl.inner(ufl.dot(dep, ZeroConstant(shape=dep.ufl_shape)) * zero_u, test_u)
+                             * ufl.ds(solver.problem.u.function_space().mesh()))
+
+                super().__init__(
+                    F == 0, solver.problem.u, solver.problem.bcs,
+                    form_compiler_parameters=solver.problem.form_compiler_parameters,
+                    solver_parameters=solver.search_direction_solver.parameters)
+                # Note: Leaks references
+                self._solver = solver
+
+            def drop_references(self):
+                # Unconditional caching of all variables
+                pass
+
+            def forward_solve(self, x, deps=None):
+                # Re-use the NewtonSolver by copying and restoring the values of
+                # dependencies
+                if deps is not None:
+                    eq_deps = self.dependencies()
+                    assert x not in eq_deps
+                    vals = tuple(map(var_copy, eq_deps))
+                    assert len(eq_deps) == len(deps)
+                    for eq_dep, dep in zip(eq_deps, deps):
+                        assert eq_dep is not dep
+                        var_assign(eq_dep, dep)
+                try:
+                    self._solver.solve(**kwargs)
+                finally:
+                    if deps is not None:
+                        assert len(eq_deps) == len(vals)
+                        for eq_dep, eq_dep_val in zip(eq_deps, vals):
+                            var_assign(eq_dep, eq_dep_val)
+
+        eq = _NewtonSolver(self)
+        eq._pre_process(annotate=annotate)
+        return_value = orig_args()
+        eq._post_process(annotate=annotate, tlm=tlm)
+        return return_value
