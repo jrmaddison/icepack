@@ -25,10 +25,14 @@ from icepack.constants import (
 )
 
 import petsc4py.PETSc as PETSc
-from tlm_adjoint import Functional, minimize_l_bfgs, minimize_tao
+from tlm_adjoint import (
+    Functional, minimize_l_bfgs, minimize_tao, taylor_test_tlm,
+    taylor_test_tlm_adjoint)
 
 
 def test_poisson_problem():
+    np.random.seed(706891626)
+
     Nx, Ny = 32, 32
 
     mesh = firedrake.UnitSquareMesh(Nx, Ny)
@@ -79,6 +83,15 @@ def test_poisson_problem():
         J.assign(loss_functional(u) + regularization(q))
         return J
 
+    for order in [1, 2, 3]:
+        min_order = taylor_test_tlm(forward, q_initial,
+                                    tlm_order=order, seed=1.0e-3)
+        assert min_order > 1.99
+
+        min_order = taylor_test_tlm_adjoint(forward, q_initial,
+                                            adjoint_order=order, seed=1.0e-3)
+        assert min_order > 1.99
+
     q = minimize_tao(forward, q_initial,
                      method=PETSc.TAO.Type.LMVM,
                      gatol=1.0e-11, grtol=0.0, gttol=0.0)
@@ -87,7 +100,13 @@ def test_poisson_problem():
 
 
 @pytest.mark.parametrize("with_noise", [False, True])
-def test_ice_shelf_inverse(with_noise):
+@pytest.mark.parametrize("diagnostic_solver_type", ["icepack", "petsc"])
+def test_ice_shelf_inverse(with_noise, diagnostic_solver_type):
+    if with_noise:
+        np.random.seed(561284280)
+    else:
+        np.random.seed(462461651)
+
     Nx, Ny = 32, 32
     Lx, Ly = 20e3, 20e3
 
@@ -129,7 +148,7 @@ def test_ice_shelf_inverse(with_noise):
     flow_solver = icepack.solvers.FlowSolver(
         model,
         dirichlet_ids=dirichlet_ids,
-        diagnostic_solver_type="petsc",
+        diagnostic_solver_type=diagnostic_solver_type,
         diagnostic_solver_parameters={
             "snes_type": "newtonls",
             "ksp_type": "preonly",
@@ -172,6 +191,15 @@ def test_ice_shelf_inverse(with_noise):
         J = Functional(name="J")
         J.assign(loss_functional(u) + regularization(q))
         return J
+
+    for order in [1, 2, 3]:
+        min_order = taylor_test_tlm(forward, firedrake.Function(q_initial.function_space()).assign(2.0),
+                                    tlm_order=order, seed=1.0e-2)
+        assert min_order > 1.99
+
+        min_order = taylor_test_tlm_adjoint(forward, firedrake.Function(q_initial.function_space()).assign(2.0),
+                                            adjoint_order=order, seed=1.0e-2)
+        assert min_order > 1.99
 
     q, _ = minimize_l_bfgs(forward, q_initial, m=100,
                            s_atol=5.0e-3, g_atol=1.0e-4)
