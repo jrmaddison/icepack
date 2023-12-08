@@ -103,7 +103,7 @@ def interpolate(f, Q, **kwargs):
     # mismatch vertical basis. This attempts to distinguish if multiple
     # subelements due to dimension or vector function.
     if issubclass(type(element), firedrake.VectorElement):
-        element = element.sub_elements()[0]
+        element = element.sub_elements[0]
 
     V = firedrake.VectorFunctionSpace(mesh, element)
     X = firedrake.interpolate(mesh.coordinates, V).dat.data_ro[:, :2]

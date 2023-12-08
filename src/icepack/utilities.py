@@ -83,10 +83,10 @@ def depth_average(q_xz, weight=firedrake.Constant(1)):
     element_z = firedrake.FiniteElement(family="R", cell="interval", degree=0)
     shape = q_xz.ufl_shape
     if len(shape) == 0:
-        element_x = element_xz.sub_elements()[0]
+        element_x = element_xz.sub_elements[0]
         element_avg = firedrake.TensorProductElement(element_x, element_z)
     elif len(shape) == 1:
-        element_xy = element_xz.sub_elements()[0].sub_elements()[0]
+        element_xy = element_xz.sub_elements[0].sub_elements[0]
         element_u = firedrake.TensorProductElement(element_xy, element_z)
         element_avg = firedrake.VectorElement(element_u, dim=shape[0])
         element_x = firedrake.VectorElement(element_xy, dim=shape[0])
