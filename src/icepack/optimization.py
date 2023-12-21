@@ -19,8 +19,8 @@ except ImportError:
     manager_method = None
 if manager_method is not None:
     from tlm_adjoint.firedrake import (
-        EquationSolver, ZeroConstant, extract_coefficients, var_assign,
-        var_copy, var_update_state)
+        EquationSolver, ZeroConstant, var_assign, var_copy, var_update_state)
+    from tlm_adjoint.firedrake.functions import extract_coefficients
 import ufl
 
 
